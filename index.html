@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>示范学习代理 · 三维交互空间</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">◎</span>
+          <div>
+            <h1>示范学习代理</h1>
+            <p>三维交互空间 · 本地小模型 · 完整回合验证</p>
+          </div>
+        </div>
+        <div class="topbar-status">
+          <span class="chip" id="model-chip">模型加载中…</span>
+          <span class="chip chip-muted" id="seed-chip">场景 —</span>
+          <span class="chip chip-muted" id="family-chip">—</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="viewport-wrap">
+          <canvas id="viewport"></canvas>
+          <div class="viewport-overlay top-left">
+            <div class="overlay-title">目标卡</div>
+            <div class="goal-card" id="goal-card">
+              <div class="goal-glyph" id="goal-glyph">—</div>
+              <div class="goal-meta">
+                <span id="goal-color">—</span>
+                <span id="goal-shape">—</span>
+              </div>
+            </div>
+          </div>
+          <div class="viewport-overlay top-right">
+            <div class="stat"><span>剩余步数</span><strong id="steps-left">—</strong></div>
+            <div class="stat"><span>额外视野</span><strong id="look-state">未使用</strong></div>
+            <div class="stat"><span>冲突步</span><strong id="conflict-count">0</strong></div>
+          </div>
+          <div class="viewport-overlay bottom-left">
+            <div class="banner" id="end-banner" hidden></div>
+          </div>
+          <div class="viewport-overlay bottom-right legend">
+            <span><i class="dot dot-char"></i>角色</span>
+            <span><i class="dot dot-device"></i>装置</span>
+            <span><i class="dot dot-object"></i>物件</span>
+            <span><i class="dot dot-candidate"></i>判定的候选</span>
+          </div>
+        </section>
+
+        <aside class="sidebar">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>驱动模式</h2>
+              <span class="hint" id="driver-hint">代理内核控制</span>
+            </div>
+            <div class="segmented" id="driver-switch">
+              <button data-driver="learned" class="active">学得</button>
+              <button data-driver="rule">规则</button>
+              <button data-driver="random">随机</button>
+              <button data-driver="demo">示范</button>
+              <button data-driver="manual">手动</button>
+            </div>
+            <p class="driver-note" id="driver-note"></p>
+            <div class="row gap">
+              <button class="btn btn-primary" id="btn-play">▶ 代理驱动</button>
+              <button class="btn" id="btn-step">单步</button>
+              <button class="btn" id="btn-reset">重置</button>
+            </div>
+            <div class="row gap">
+              <button class="btn btn-ghost" id="btn-demo">载入示范轨迹</button>
+              <button class="btn btn-ghost" id="btn-random-scene">随机场景</button>
+            </div>
+            <div class="row gap controls-row">
+              <label class="field">
+                <span>条件</span>
+                <select id="condition-select">
+                  <option value="auto">由种子决定</option>
+                  <option value="standard">标准</option>
+                  <option value="ambiguous">歧义（同形近义装置）</option>
+                  <option value="cluttered">拥挤布局</option>
+                  <option value="unsolvable">不可解（应拒绝）</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>种子</span>
+                <input id="seed-input" type="number" value="9000" min="1" step="1" />
+              </label>
+              <button class="btn btn-ghost" id="btn-load-seed">载入</button>
+            </div>
+            <label class="checkbox">
+              <input type="checkbox" id="chk-realtime" checked />
+              <span>实时动画（关闭则瞬间执行）</span>
+            </label>
+            <div class="speed-row">
+              <span>动画速度</span>
+              <input type="range" id="speed-input" min="0.5" max="3" step="0.1" value="1.6" />
+              <span id="speed-value">1.6×</span>
+            </div>
+          </section>
+
+          <section class="panel" id="manual-panel" hidden>
+            <div class="panel-head">
+              <h2>手动操作</h2>
+              <span class="hint">直接驱动角色</span>
+            </div>
+            <div class="manual-grid" id="manual-actions"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>策略动作</h2>
+              <span class="hint" id="action-timing"></span>
+            </div>
+            <div class="action-now" id="action-now">
+              <div class="action-label" id="action-label">—</div>
+              <div class="action-reason" id="action-reason">等待开始</div>
+            </div>
+            <div class="action-probs" id="action-probs"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>输入观测</h2>
+              <span class="hint" id="obs-dim"></span>
+            </div>
+            <div class="obs-groups" id="obs-groups"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>回合日志</h2>
+              <span class="hint">失败反馈回写代理内核</span>
+            </div>
+            <ol class="log" id="log"></ol>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>评测摘要</h2>
+              <span class="hint">完整回合</span>
+            </div>
+            <div class="eval-table" id="eval-table">加载报告中…</div>
+          </section>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/ui/main.ts"></script>
+  </body>
+</html>

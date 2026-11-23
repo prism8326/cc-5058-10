@@ -1,0 +1,41 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "demo:collect": "tsx scripts/collect.ts",
+    "demo:train": "tsx scripts/train.ts",
+    "demo:evaluate": "tsx scripts/evaluate.ts",
+    "demo:all": "tsx scripts/collect.ts && tsx scripts/train.ts && tsx scripts/evaluate.ts",
+    "typecheck": "tsc --noEmit",
+    "demo:verify": "tsx scripts/verify-replay.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prism8326/cc-5058-10.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/prism8326/cc-5058-10/issues"
+  },
+  "homepage": "https://github.com/prism8326/cc-5058-10#readme",
+  "type": "module",
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^22.20.5",
+    "@types/three": "^0.187.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.8"
+  }
+}

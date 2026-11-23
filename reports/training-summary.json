@@ -1,0 +1,14 @@
+{
+  "datasetHash": "b9f4c555",
+  "datasetSeeds": 380,
+  "trainSamples": 1040,
+  "modelVersion": "local-bc-dagger-4bc463a8",
+  "accuracy": 1,
+  "trainSeeds": [
+    1000,
+    1001,
+    1002,
+    1003,
+    1004
+  ]
+}
