@@ -12,6 +12,9 @@
     "demo:train": "tsx scripts/train.ts",
     "demo:evaluate": "tsx scripts/evaluate.ts",
     "demo:all": "tsx scripts/collect.ts && tsx scripts/train.ts && tsx scripts/evaluate.ts",
+    "demo:experiment": "tsx scripts/experiment.ts",
+    "demo:verify:experiment": "tsx scripts/verify-experiment.ts",
+    "demo:all:experiment": "tsx scripts/collect.ts && tsx scripts/experiment.ts && tsx scripts/verify-experiment.ts",
     "typecheck": "tsc --noEmit",
     "demo:verify": "tsx scripts/verify-replay.ts"
   },

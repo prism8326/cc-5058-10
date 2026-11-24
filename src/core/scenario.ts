@@ -12,6 +12,7 @@ import {
   VAL_REFUSAL_START,
   VAL_REFUSAL_END,
   hiddenConditionForSeed,
+  isNovelLayoutSeed,
 } from "./constants";
 import { mulberry32 } from "./rng";
 import { cellIndex, nearestApproach, type NavGrid } from "./nav";
@@ -34,10 +35,13 @@ export interface ScenarioSpec {
   nearMiss: boolean;
   duplicatePair: boolean;
   noMatch: boolean;
+  /** Novel-layout family: different spawn corner and a denser, tighter scene. */
+  novelLayout: boolean;
 }
 
 export function scenarioSpec(seed: number): ScenarioSpec {
   const hidden = hiddenConditionForSeed(seed);
+  const novel = isNovelLayoutSeed(seed);
   const local = seed % 29;
   const refusalTraining =
     (seed >= TRAIN_REFUSAL_START && seed <= TRAIN_REFUSAL_END) ||
@@ -53,6 +57,7 @@ export function scenarioSpec(seed: number): ScenarioSpec {
       nearMiss: false,
       duplicatePair: true,
       noMatch: false,
+      novelLayout: false,
     };
   }
   if (hidden === "unsolvable" || (!hidden && seed === 900)) {
@@ -63,6 +68,7 @@ export function scenarioSpec(seed: number): ScenarioSpec {
       nearMiss: false,
       duplicatePair: true,
       noMatch: true,
+      novelLayout: false,
     };
   }
   if (hidden === "ambiguous" || (!hidden && local === 7)) {
@@ -73,6 +79,7 @@ export function scenarioSpec(seed: number): ScenarioSpec {
       nearMiss: true,
       duplicatePair: false,
       noMatch: false,
+      novelLayout: false,
     };
   }
   if (hidden === "cluttered" || (!hidden && (local === 11 || local === 19))) {
@@ -83,6 +90,20 @@ export function scenarioSpec(seed: number): ScenarioSpec {
       nearMiss: local % 2 === 0,
       duplicatePair: false,
       noMatch: false,
+      novelLayout: false,
+    };
+  }
+  if (novel) {
+    // Same observable schema, different geometry: mirrored spawn and more
+    // obstacles. This is the distribution shift the experiment probes.
+    return {
+      condition: "standard",
+      clutter: 15,
+      spacing: 1,
+      nearMiss: local % 3 === 0,
+      duplicatePair: false,
+      noMatch: false,
+      novelLayout: true,
     };
   }
   return {
@@ -92,13 +113,15 @@ export function scenarioSpec(seed: number): ScenarioSpec {
     nearMiss: local % 3 === 0,
     duplicatePair: false,
     noMatch: false,
+    novelLayout: false,
   };
 }
 
-export function seedLabel(seed: number): "train" | "dev" | "validation" | "hidden-eval" | "manual" {
+export function seedLabel(seed: number): "train" | "dev" | "validation" | "novel" | "hidden-eval" | "manual" {
   if (seed >= TRAIN_SEED_START && seed <= TRAIN_SEED_END) return "train";
   if (seed >= DEV_SEED_START && seed <= DEV_SEED_END) return "dev";
   if (seed >= VAL_SEED_START && seed <= VAL_SEED_END) return "validation";
+  if (isNovelLayoutSeed(seed)) return "novel";
   if (hiddenConditionForSeed(seed)) return "hidden-eval";
   return "manual";
 }
@@ -129,8 +152,9 @@ function carveBlobs(walls: boolean[], rng: Rng, count: number, spawn: GridPos): 
     const h = rng.range(1, 2);
     const x0 = rng.range(2, GRID - 2 - w);
     const y0 = rng.range(2, GRID - 2 - h);
-    // Keep the spawn corridor (rows 8-11, cols 4-8) clear.
-    const overlapsSpawn = x0 <= 8 && x0 + w >= 4 && y0 <= 11 && y0 + h >= 8;
+    // Keep a 5×4 corridor around the spawn clear. For the legacy spawn (6,10)
+    // this is exactly the original rows 8-11 / cols 4-8 rectangle.
+    const overlapsSpawn = x0 <= spawn.x + 2 && x0 + w >= spawn.x - 2 && y0 <= spawn.y + 1 && y0 + h >= spawn.y - 2;
     if (overlapsSpawn) continue;
     for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) walls[cellIndex(x, y, GRID)] = true;
     placed++;
@@ -213,7 +237,9 @@ export function generateScenario(seed: number): Scenario {
   const rng = mulberry32((Math.imul(seed, 2654435761) ^ 0x5f3759df) >>> 0);
   const walls = emptyWalls();
   borderWalls(walls);
-  const spawn: GridPos = { x: 6, y: 10 };
+  // Novel-layout seeds spawn in the opposite corner; everything downstream
+  // (nav, observation encoding) is unchanged.
+  const spawn: GridPos = spec.novelLayout ? { x: GRID - 7, y: 2 } : { x: 6, y: 10 };
   carveBlobs(walls, rng, spec.clutter, spawn);
   walls[cellIndex(spawn.x, spawn.y, GRID)] = false;
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {

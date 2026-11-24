@@ -1,13 +1,15 @@
 import { FEATURE_DIM, ACTION_COUNT, FEATURE_VERSION, ACTION_VERSION } from "./constants.js";
 import type { ModelJSON } from "./model.js";
 
+export const DEFAULT_ARCH = [FEATURE_DIM, 96, 96, ACTION_COUNT];
+
 export interface FormatCheck {
   ok: boolean;
   errors: string[];
 }
 
 /** Strict shape/version validation for weights loaded from disk. */
-export function validateModelFormat(json: unknown): FormatCheck {
+export function validateModelFormat(json: unknown, expectedArch: number[] = DEFAULT_ARCH): FormatCheck {
   const errors: string[] = [];
   const m = json as Partial<ModelJSON>;
   if (!m || typeof m !== "object") return { ok: false, errors: ["模型不是对象"] };
@@ -22,9 +24,15 @@ export function validateModelFormat(json: unknown): FormatCheck {
   const weights = m.weights!;
   const biases = m.biases!;
   if (weights.length !== biases.length) errors.push("权重/偏置层数不一致");
-  const expected = [FEATURE_DIM, 96, 96, ACTION_COUNT];
-  if (!Array.isArray(meta.arch) || meta.arch.length !== expected.length) {
-    errors.push(`网络结构应为 ${expected.join("→")}`);
+  if (!Array.isArray(meta.arch) || meta.arch.length !== expectedArch.length) {
+    errors.push(`网络结构应为 ${expectedArch.join("→")}`);
+  } else {
+    for (let i = 0; i < expectedArch.length; i++) {
+      if (meta.arch[i] !== expectedArch[i]) {
+        errors.push(`网络结构应为 ${expectedArch.join("→")}，实际 ${meta.arch.join("→")}`);
+        break;
+      }
+    }
   }
   for (let l = 0; l < weights.length; l++) {
     const layer = weights[l];

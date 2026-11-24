@@ -83,6 +83,33 @@ export function initModel(seed: number): MLP {
   return new MLP([FEATURE_DIM, 96, 96, ACTION_COUNT], rng);
 }
 
+/**
+ * Single-layer linear softmax policy over the same observable features. It uses
+ * the shared optimizer with one dense layer, so the comparison isolates
+ * representation capacity (linear vs. one hidden ReLU stack), not the trainer.
+ */
+export function initLinearModel(seed: number): MLP {
+  const rng = mulberry32(seed);
+  return new MLP([FEATURE_DIM, ACTION_COUNT], rng);
+}
+
+export function paramCount(net: MLP): number {
+  let total = 0;
+  for (let l = 0; l < net.weights.length; l++) {
+    total += net.weights[l].length * net.biases[l].length;
+  }
+  return total;
+}
+
+/** Multiply-accumulate operations of one forward pass (biases counted as adds). */
+export function macCount(net: MLP): number {
+  let total = 0;
+  for (const layer of net.weights) {
+    total += layer.length * layer[0].length;
+  }
+  return total;
+}
+
 export interface TrainSample {
   x: number[];
   y: number;

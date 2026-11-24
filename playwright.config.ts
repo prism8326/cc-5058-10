@@ -3,6 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 const LIB_PATH = [
   "/tmp/pwlibs/root/usr/lib/aarch64-linux-gnu",
   "/tmp/pwlibs/root/lib/aarch64-linux-gnu",
+  "/tmp/debs/root/usr/lib/aarch64-linux-gnu",
+  "/tmp/debs/root/lib/aarch64-linux-gnu",
   process.env.LD_LIBRARY_PATH ?? "",
 ]
   .filter(Boolean)

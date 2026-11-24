@@ -93,3 +93,55 @@ test("载入示范轨迹并在结果区显示策略动作与观测", async ({ pa
   const errors = (page as unknown as { jsErrors: string[] }).jsErrors;
   expect(errors).toEqual([]);
 });
+
+test("仲裁代理在新布局驱动完整回合并显示来源与推理成本", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#model-chip")).toContainText("模型", { timeout: 15000 });
+  await expect(page.locator("#arbiter-status")).toContainText("触发条件已载入", { timeout: 10000 });
+  await page.uncheck("#chk-realtime");
+  await loadSeed(page, 3000);
+  await page.click("[data-driver='arbiter']");
+  await expect(page.locator("#arbiter-status")).toContainText("阈值", { timeout: 10000 });
+  await page.click("#btn-play");
+  await expect(page.locator("#end-banner")).toBeVisible({ timeout: 30000 });
+  const banner = await page.locator("#end-banner").textContent();
+  expect(banner).toMatch(/任务完成|安全拒绝/);
+  expect(banner).toMatch(/示范请求 \d+ 次 · 前向 \d+ 次/);
+  // Every logged step carries an arbitration provenance chip.
+  const sourceCount = await page.locator("#log .log-source").count();
+  const logCount = await page.locator("#log li").count();
+  expect(sourceCount).toBeGreaterThan(0);
+  expect(sourceCount).toBeLessThanOrEqual(logCount);
+  await expect(page.locator("#action-timing")).toContainText("仲裁");
+  const errors = (page as unknown as { jsErrors: string[] }).jsErrors;
+  expect(errors).toEqual([]);
+});
+
+test("仲裁置信阈值调高时转交示范者并计数", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#model-chip")).toContainText("模型", { timeout: 15000 });
+  await page.uncheck("#chk-realtime");
+  await loadSeed(page, 9000);
+  await page.click("[data-driver='arbiter']");
+  await page.selectOption("#arbiter-mode", "defer");
+  await page.fill("#arbiter-threshold", "0.99");
+  await page.dispatchEvent("#arbiter-threshold", "change");
+  await page.click("#btn-play");
+  await expect(page.locator("#end-banner")).toBeVisible({ timeout: 30000 });
+  const banner = await page.locator("#end-banner").textContent();
+  expect(banner).toMatch(/示范请求 [1-9]\d* 次/);
+  const deferred = await page.locator("#log .log-source.defer").count();
+  expect(deferred).toBeGreaterThan(0);
+});
+
+test("仲裁模型缺失时界面提示而非静默失败", async ({ page }) => {
+  await page.route("**/models/experiment-linear.json", (route) => route.fulfill({ status: 500, body: "missing" }));
+  await page.goto("/");
+  await expect(page.locator("#model-chip")).toContainText("模型", { timeout: 15000 });
+  await page.click("[data-driver='arbiter']");
+  await expect(page.locator("#arbiter-error")).toBeVisible({ timeout: 10000 });
+  await expect(page.locator("#arbiter-error")).toContainText("加载失败");
+  await page.uncheck("#chk-realtime");
+  await page.click("#btn-play");
+  await expect(page.locator("#log li").last()).toContainText("仲裁模型", { timeout: 10000 });
+});

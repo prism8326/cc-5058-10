@@ -60,6 +60,7 @@
             </div>
             <div class="segmented" id="driver-switch">
               <button data-driver="learned" class="active">学得</button>
+              <button data-driver="arbiter">仲裁</button>
               <button data-driver="rule">规则</button>
               <button data-driver="random">随机</button>
               <button data-driver="demo">示范</button>
@@ -121,6 +122,36 @@
               <div class="action-reason" id="action-reason">等待开始</div>
             </div>
             <div class="action-probs" id="action-probs"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>仲裁代理</h2>
+              <span class="hint" id="arbiter-status">未启用</span>
+            </div>
+            <div class="arbiter-controls">
+              <label class="field">
+                <span>策略表示</span>
+                <select id="arbiter-model">
+                  <option value="linear">线性 softmax（400 参数）</option>
+                  <option value="mlp">小型 MLP（18832 参数）</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>低置信处理</span>
+                <select id="arbiter-mode">
+                  <option value="both">先补观测，再转交</option>
+                  <option value="defer">直接转交示范者</option>
+                  <option value="gather">只补观测</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>置信阈值</span>
+                <input id="arbiter-threshold" type="number" min="0.05" max="0.99" step="0.05" value="0.8" />
+              </label>
+            </div>
+            <div class="arbiter-stats" id="arbiter-stats"></div>
+            <div class="arbiter-error" id="arbiter-error" hidden></div>
           </section>
 
           <section class="panel">

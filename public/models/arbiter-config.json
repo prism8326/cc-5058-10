@@ -1,0 +1,27 @@
+{
+  "schema": "arbiter-config/v1",
+  "generatedAt": "2026-11-24T10:50:57.427Z",
+  "trigger": {
+    "threshold": 0.8,
+    "mode": "both",
+    "maxDeferrals": null
+  },
+  "thresholds": {
+    "linear": {
+      "defer": 0.8,
+      "gather": 0.8,
+      "both": 0.8
+    },
+    "mlp": {
+      "defer": 0.8,
+      "gather": 0.8,
+      "both": 0.8
+    }
+  },
+  "selectedModels": {
+    "linear": "experiment-linear.json",
+    "mlp": "experiment-mlp.json"
+  },
+  "experiment": "reports/demonstrator-policy-experiment.json",
+  "note": "低置信触发条件；由 demo:experiment 标定并在图形界面加载。"
+}

@@ -2,6 +2,8 @@ export const ENGINE_VERSION = "1.0.0";
 export const FEATURE_VERSION = "obs-v2";
 export const ACTION_VERSION = "act-v2";
 export const DATASET_VERSION = "demo-v2";
+export const CONFIDENCE_VERSION = "conf-v1";
+export const ARBITRATION_VERSION = "arb-v1";
 
 export const GRID = 13;
 export const MAX_FIXTURES = 6;
@@ -88,10 +90,18 @@ export const TRAIN_REFUSAL_START = 1600;
 export const TRAIN_REFUSAL_END = 1699;
 export const VAL_REFUSAL_START = 2600;
 export const VAL_REFUSAL_END = 2619;
+/**
+ * Held-out "new layout" family: same observable schema and action set, but the
+ * generator uses a different spawn corner, denser clutter and tighter fixture
+ * spacing. Never used for training, threshold calibration or model selection.
+ */
+export const NOVEL_LAYOUT_START = 3000;
+export const NOVEL_LAYOUT_END = 3099;
 
 export type Condition = "standard" | "ambiguous" | "cluttered" | "unsolvable";
 
 export function hiddenConditionForSeed(seed: number): Condition | null {
+  if (seed >= NOVEL_LAYOUT_START && seed <= NOVEL_LAYOUT_END) return "standard";
   if (seed >= HIDDEN_AMBIGUOUS_START && seed <= HIDDEN_AMBIGUOUS_END) return "ambiguous";
   if (seed >= HIDDEN_CLUTTERED_START && seed <= HIDDEN_CLUTTERED_END) return "cluttered";
   if (seed >= HIDDEN_UNSOLVABLE_START && seed <= HIDDEN_UNSOLVABLE_END) return "unsolvable";
@@ -99,12 +109,17 @@ export function hiddenConditionForSeed(seed: number): Condition | null {
   return null;
 }
 
-export function seedFamily(seed: number): "train" | "dev" | "validation" | "hidden-eval" | "manual" {
+export function isNovelLayoutSeed(seed: number): boolean {
+  return seed >= NOVEL_LAYOUT_START && seed <= NOVEL_LAYOUT_END;
+}
+
+export function seedFamily(seed: number): "train" | "dev" | "validation" | "novel" | "hidden-eval" | "manual" {
   if (seed >= TRAIN_SEED_START && seed <= TRAIN_SEED_END) return "train";
   if (seed >= TRAIN_REFUSAL_START && seed <= TRAIN_REFUSAL_END) return "train";
   if (seed >= DEV_SEED_START && seed <= DEV_SEED_END) return "dev";
   if (seed >= VAL_SEED_START && seed <= VAL_SEED_END) return "validation";
   if (seed >= VAL_REFUSAL_START && seed <= VAL_REFUSAL_END) return "validation";
+  if (isNovelLayoutSeed(seed)) return "novel";
   if (hiddenConditionForSeed(seed)) return "hidden-eval";
   return "manual";
 }

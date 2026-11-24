@@ -17,6 +17,8 @@ import type {
   GridPos,
   LegalAction,
   Policy,
+  PolicyAudit,
+  PolicyDecision,
   Scenario,
   SlotView,
   StepObservation,
@@ -53,6 +55,17 @@ export class EpisodeRunner {
   wrongOperates = 0;
   wastedSteps = 0;
   stuckReason: string | null = null;
+  demonstrationRequests = 0;
+  inference: EpisodeResult["inference"] = {
+    forwardPasses: 0,
+    featureChecks: 0,
+    multiplyAdds: 0,
+    decisionMicros: 0,
+    demonstratorSteps: 0,
+    gatherSteps: 0,
+  };
+  decisions: PolicyAudit[] = [];
+  private lastDecision: PolicyDecision | null = null;
 
   constructor(scenario: Scenario) {
     this.scenario = scenario;
@@ -210,7 +223,7 @@ export class EpisodeRunner {
   }
 
   /** Executes one action. Returns null when the episode has already ended. */
-  step(action: number, policy?: Policy): StepRecord | null {
+  step(action: number, policy?: Policy, decision?: PolicyDecision): StepRecord | null {
     if (this.ended) return null;
     if (this.stepsRemaining <= 0) {
       this.ended = true;
@@ -218,6 +231,7 @@ export class EpisodeRunner {
       this.stuckReason = "步数预算耗尽";
       return null;
     }
+    if (decision) this.recordDecision(decision);
     const obs = this.observation();
     const conflict = ambiguousCandidates(obs).length >= 2;
     if (conflict) this.conflictSteps += 1;
@@ -300,8 +314,34 @@ export class EpisodeRunner {
       stepIndex: record.index,
       endReason: this.endReason,
       success: this.endReason === "success",
+      decision: this.lastDecision ?? undefined,
     });
     return record;
+  }
+
+  /** Records arbitration provenance and accounted work for one decision. */
+  recordDecision(decision: PolicyDecision): void {
+    this.lastDecision = decision;
+    const cost = decision.cost;
+    if (cost) {
+      this.inference.forwardPasses += cost.forwardPasses;
+      this.inference.featureChecks += cost.featureChecks;
+      this.inference.multiplyAdds += cost.multiplyAdds;
+      this.inference.decisionMicros += cost.micros ?? 0;
+    }
+    if (decision.mode === "demonstrator") {
+      this.inference.demonstratorSteps += 1;
+      this.demonstrationRequests += 1;
+    }
+    if (decision.mode === "gather") this.inference.gatherSteps += 1;
+    this.decisions.push({
+      action: decision.action,
+      source: decision.source,
+      confidence: decision.confidence,
+      note: decision.note ?? "",
+      reason: decision.note ?? "",
+      gatherAction: decision.mode === "gather" ? decision.action : undefined,
+    });
   }
 
   result(policyId: string, policyKind: EpisodeResult["policyKind"]): EpisodeResult {
@@ -329,6 +369,9 @@ export class EpisodeRunner {
       error: null,
       wrongOperates: this.wrongOperates,
       wastedSteps: this.wastedSteps,
+      demonstrationRequests: this.demonstrationRequests,
+      inference: { ...this.inference },
+      decisions: [...this.decisions],
     };
   }
 }
@@ -358,16 +401,32 @@ export function runEpisode(scenario: Scenario, policy: Policy, options: RunOptio
   const limit = options.maxSteps ?? Number.POSITIVE_INFINITY;
   let obs = runner.observation();
   while (!runner.ended && runner.steps.length < limit) {
+    let decision: PolicyDecision | undefined;
     let action: number;
+    const t0 = performance.now();
     try {
-      action = policy.select(obs);
+      if (policy.decide) {
+        decision = policy.decide(obs);
+        action = decision.action;
+      } else {
+        action = policy.select(obs);
+      }
     } catch (err) {
       runner.ended = true;
       runner.endReason = "stuck";
       runner.stuckReason = `策略异常: ${(err as Error).message}`;
       break;
     }
-    const record = runner.step(action, policy);
+    if (decision) {
+      decision.cost = {
+        forwardPasses: 0,
+        featureChecks: 0,
+        multiplyAdds: 0,
+        ...decision.cost,
+        micros: (performance.now() - t0) * 1000,
+      };
+    }
+    const record = runner.step(action, policy, decision);
     if (!record) break;
     options.onStep?.(record, obs);
     obs = runner.observation();

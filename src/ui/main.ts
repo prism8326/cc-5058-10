@@ -2,6 +2,7 @@ import {
   ACTIONS,
   ACTION_COUNT,
   COLORS,
+  FEATURE_DIM,
   FEATURE_VERSION,
   GLYPHS,
   GLYPH_SYMBOLS,
@@ -28,11 +29,12 @@ import {
   type RuleDemonstrator,
 } from "../core/policies";
 import { validateModelFormat } from "../core/validate";
-import type { EpisodeResult, Scenario, StepObservation } from "../core/types";
+import { makeArbiter, type ArbiterConfig, type ArbiterPolicy, type LowConfidenceMode } from "../core/arbiter";
+import type { EpisodeResult, PolicyDecision, Scenario, StepObservation } from "../core/types";
 import { Scene3D } from "./scene3d";
 import "./styles.css";
 
-type DriverKind = "learned" | "rule" | "random" | "demo" | "manual";
+type DriverKind = "learned" | "arbiter" | "rule" | "random" | "demo" | "manual";
 
 interface DemoDataset {
   schema: string;
@@ -70,6 +72,19 @@ let forcedCondition: string = "auto";
 let lastObs: StepObservation | null = null;
 let discoveredSeeds: number[] = [];
 let ruleKernel: RuleDemonstrator | null = null;
+let arbiter: ArbiterPolicy | null = null;
+let arbiterNet: MLP | null = null;
+let arbiterModelKind: "linear" | "mlp" = "linear";
+let arbiterMode: LowConfidenceMode = "both";
+let arbiterThreshold = 0.8;
+let arbiterError: string | null = null;
+let arbiterConfigLoaded = false;
+let arbiterMetaVersion = "";
+let lastDecision: PolicyDecision | null = null;
+let arbiterEpisodeSteps = 0;
+let arbiterEpisodeGathers = 0;
+let arbiterEpisodeDefers = 0;
+const arbiterCache = new Map<"linear" | "mlp", MLP | null>();
 
 async function loadModel(): Promise<void> {
   try {
@@ -107,6 +122,106 @@ async function loadDemos(): Promise<void> {
   } catch {
     // Demonstration replay is optional; the rest of the UI still works.
   }
+}
+
+interface ArbiterConfigFile {
+  trigger: ArbiterConfig;
+  thresholds?: { linear?: Record<string, number>; mlp?: Record<string, number> };
+  selectedModels?: { linear?: string; mlp?: string };
+}
+
+async function loadArbiterConfig(): Promise<void> {
+  try {
+    const res = await fetch("/models/arbiter-config.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cfg: ArbiterConfigFile = await res.json();
+    if (cfg.trigger) {
+      arbiterThreshold = cfg.trigger.threshold;
+      arbiterMode = cfg.trigger.mode;
+      $<HTMLInputElement>("arbiter-threshold").value = String(arbiterThreshold);
+      $<HTMLSelectElement>("arbiter-mode").value = arbiterMode;
+    }
+    $("arbiter-status").textContent = "触发条件已载入";
+    arbiterConfigLoaded = true;
+    renderArbiterStats();
+  } catch (err) {
+    arbiterError = `仲裁配置未载入：${(err as Error).message}（可运行 npm run demo:experiment 生成）`;
+    showArbiterError();
+  }
+}
+
+async function loadArbiterModel(kind: "linear" | "mlp"): Promise<MLP | null> {
+  if (arbiterCache.has(kind)) return arbiterCache.get(kind) ?? null;
+  const file = kind === "linear" ? "experiment-linear.json" : "experiment-mlp.json";
+  try {
+    const res = await fetch(`/models/${file}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const fmt = validateModelFormat(json, kind === "linear" ? [FEATURE_DIM, ACTION_COUNT] : undefined);
+    if (!fmt.ok) throw new Error(fmt.errors.slice(0, 2).join("；"));
+    const net = MLP.fromJSON(json);
+    arbiterCache.set(kind, net);
+    return net;
+  } catch (err) {
+    arbiterCache.set(kind, null);
+    arbiterError = `仲裁模型 ${file} 加载失败：${(err as Error).message}（运行 npm run demo:experiment）`;
+    showArbiterError();
+    return null;
+  }
+}
+
+function buildArbiter(): ArbiterPolicy | null {
+  if (!arbiterNet) return null;
+  const config: ArbiterConfig = { threshold: arbiterThreshold, mode: arbiterMode, maxDeferrals: null };
+  const policy = makeArbiter(arbiterNet, {
+    modelKind: arbiterModelKind,
+    modelVersion: arbiterMetaVersion,
+    config,
+    teacher: ruleKernel ?? makeRuleDemonstrator(),
+  });
+  arbiterError = null;
+  showArbiterError();
+  return policy;
+}
+
+function showArbiterError(): void {
+  const el = $("arbiter-error");
+  if (!arbiterError) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.textContent = arbiterError;
+}
+
+function renderArbiterStats(): void {
+  const container = $("arbiter-stats");
+  container.innerHTML = "";
+  const stats = arbiter?.stats;
+  const entries: Array<[string, string, string]> = [
+    ["决策", String(stats?.decisions ?? 0), ""],
+    ["补观测", String(stats?.gathers ?? 0), "gather"],
+    ["转交示范", String(stats?.deferrals ?? 0), "defer"],
+    ["低置信", String(stats?.lowConfidence ?? 0), "bad"],
+    ["本回合请求", String(arbiterEpisodeDefers), arbiterEpisodeDefers > 0 ? "defer" : ""],
+  ];
+  for (const [label, value, cls] of entries) {
+    const cell = document.createElement("div");
+    cell.className = `arbiter-stat ${cls}`.trim();
+    cell.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+    container.appendChild(cell);
+  }
+  const kindLabel = arbiterModelKind === "linear" ? "线性" : "MLP";
+  $("arbiter-status").textContent = arbiter
+    ? `${kindLabel} · 阈值 ${arbiterThreshold.toFixed(2)} · ${modeLabel(arbiterMode)}`
+    : arbiterConfigLoaded
+      ? `触发条件已载入 · 阈值 ${arbiterThreshold.toFixed(2)} · 选择“仲裁”驱动`
+      : "未启用（选择“仲裁”驱动）";
+}
+
+function modeLabel(mode: LowConfidenceMode): string {
+  return mode === "defer" ? "转交示范" : mode === "gather" ? "补观测" : "补观测→转交";
 }
 
 async function loadEvalReport(): Promise<void> {
@@ -248,6 +363,14 @@ function loadScenario(seed: number, conditionOverride?: string): void {
   scene3d.setCharacterCell(scenario.start);
   runner = new EpisodeRunner(scenario);
   if (ruleKernel) ruleKernel.reset?.(scenario.seed);
+  if (driver === "arbiter" && arbiterNet) {
+    arbiter = buildArbiter();
+    arbiter?.reset?.(scenario.seed);
+  }
+  lastDecision = null;
+  arbiterEpisodeSteps = 0;
+  arbiterEpisodeGathers = 0;
+  arbiterEpisodeDefers = 0;
   lastObs = runner.observation();
   renderScenarioHeader();
   renderGoal();
@@ -256,6 +379,7 @@ function loadScenario(seed: number, conditionOverride?: string): void {
   $("end-banner").hidden = true;
   $<HTMLInputElement>("seed-input").value = String(currentSeed);
   updateManualButtons();
+  renderArbiterStats();
   scene3d.highlight({
     slots: lastObs.snapshot.slots,
     inspected: [],
@@ -273,6 +397,8 @@ function driverNote(): string {
   switch (driver) {
     case "learned":
       return "小模型只接收 139 维可观测特征，输出动作用引擎合法性掩码过滤。不能读取隐藏目标槽。";
+    case "arbiter":
+      return "仲裁：模型先给出合法动作分布；置信低于阈值时，先补观测或把该回合转交示范者。来源、置信与推理成本写入日志。";
     case "rule":
       return "规则示范策略读取同一观测向量，按颜色/形状缩小候选，再用刻符与视野消解歧义，必要时拒绝。";
     case "random":
@@ -292,6 +418,7 @@ function renderScenarioHeader(): void {
     train: "训练种子",
     dev: "开发种子",
     validation: "验证种子",
+    novel: "新布局种子",
     "hidden-eval": "隐藏评测种子",
     manual: "手工种子",
   };
@@ -302,7 +429,7 @@ function renderScenarioHeader(): void {
     unsolvable: "不可解",
   };
   $("family-chip").textContent = `${familyLabels[family] ?? family} · ${condLabels[scenario.condition]}`;
-  $("family-chip").style.color = family === "hidden-eval" ? "#fbbf24" : "#8fa1c4";
+  $("family-chip").style.color = family === "hidden-eval" ? "#fbbf24" : family === "novel" ? "#7dd3fc" : "#8fa1c4";
 }
 
 function renderGoal(): void {
@@ -317,6 +444,11 @@ function policyForCurrent(): { select: (obs: StepObservation) => number; id: str
     if (model) return makeLearnedPolicy(model, { id: `learned:${modelMeta?.version ?? "local"}`, version: modelMeta?.version ?? "local" });
     // Missing model must never silently fall back to the demonstrator.
     return { id: "missing-model", select: () => -1 };
+  }
+  if (driver === "arbiter") {
+    if (!arbiter) arbiter = buildArbiter();
+    if (!arbiter) return { id: "missing-arbiter", select: () => -1 };
+    return arbiter;
   }
   if (driver === "rule") {
     if (!ruleKernel) ruleKernel = makeRuleDemonstrator();
@@ -345,7 +477,13 @@ function chooseAction(): number {
   const obs = runner.observation();
   if (driver === "manual") return -1;
   const policy = policyForCurrent();
-  if (policy.id === "missing-model") return -1;
+  if (policy.id === "missing-model" || policy.id === "missing-arbiter") return -1;
+  if (driver === "arbiter" && arbiter) {
+    const decision = arbiter.decide!(obs);
+    lastDecision = decision;
+    renderArbiterDecision(decision, obs, "arbiter");
+    return decision.action;
+  }
   const action = policy.select(obs);
   // Surface model probabilities for the action panel.
   if (driver === "learned" && model) {
@@ -362,7 +500,12 @@ async function executeAction(action: number): Promise<void> {
   if (!runner || busy) return;
   const obs = runner.observation();
   lastObs = obs;
-  const record = runner.step(action, driver === "rule" ? (ruleKernel ?? undefined) : undefined);
+  const decision = driver === "arbiter" ? lastDecision ?? undefined : undefined;
+  const record = runner.step(
+    action,
+    driver === "rule" ? (ruleKernel ?? undefined) : driver === "arbiter" ? (arbiter ?? undefined) : undefined,
+    decision,
+  );
   if (!record) {
     finishIfEnded();
     return;
@@ -373,7 +516,7 @@ async function executeAction(action: number): Promise<void> {
   }
   renderActionNow(record.action, record.reason, record.legal);
   renderObservation(obs);
-  appendLog(record.index, record.action, record.reason, record.legal, record.conflict, driver);
+  appendLog(record.index, record.action, record.reason, record.legal, record.conflict, driver, undefined, decision);
   if (record.action === LOOK_ACTION) scene3d.playLookSweep();
 
   const highlight = {
@@ -394,6 +537,7 @@ async function executeAction(action: number): Promise<void> {
   scene3d.highlight(highlight);
   updateStats();
   updateManualButtons();
+  renderArbiterStats();
   finishIfEnded();
 }
 
@@ -417,15 +561,19 @@ function finishIfEnded(): void {
   banner.className = "banner";
   const targetNote =
     result.targetSlot === null ? "" : `（正确槽位 #${result.targetSlot}）`;
+  const arbiterNote =
+    driver === "arbiter"
+      ? ` · 示范请求 ${result.demonstrationRequests} 次 · 前向 ${result.inference.forwardPasses} 次`
+      : "";
   if (result.success) {
     banner.classList.add("success");
-    banner.textContent = `任务完成 ✓ 操作正确装置 #${result.operatedSlots.at(-1)}${targetNote}`;
+    banner.textContent = `任务完成 ✓ 操作正确装置 #${result.operatedSlots.at(-1)}${targetNote}${arbiterNote}`;
   } else if (result.safeRefusal) {
     banner.classList.add("refuse");
-    banner.textContent = `安全拒绝 ✓ 场景不可解，代理主动终止${targetNote}`;
+    banner.textContent = `安全拒绝 ✓ 场景不可解，代理主动终止${targetNote}${arbiterNote}`;
   } else if (result.endReason === "refused") {
     banner.classList.add("refuse");
-    banner.textContent = `代理拒绝执行（场景其实可解）${targetNote}`;
+    banner.textContent = `代理拒绝执行（场景其实可解）${targetNote}${arbiterNote}`;
   } else {
     banner.classList.add("failure");
     const reasons: Record<string, string> = {
@@ -434,7 +582,7 @@ function finishIfEnded(): void {
       "invalid-limit": "非法尝试过多",
       stuck: "代理卡住（无新信息）",
     };
-    banner.textContent = `失败：${reasons[result.endReason ?? ""] ?? result.endReason}${targetNote}`;
+    banner.textContent = `失败：${reasons[result.endReason ?? ""] ?? result.endReason}${targetNote}${arbiterNote}`;
   }
   appendLog(
     result.steps.length,
@@ -445,11 +593,15 @@ function finishIfEnded(): void {
     driver,
     result.success ? "success" : "invalid",
   );
+  if (driver === "arbiter") {
+    $("arbiter-status").textContent = `完成 · 请求 ${result.demonstrationRequests} · 前向 ${result.inference.forwardPasses}`;
+  }
   stopRun();
 }
 
 function driverKind(): EpisodeResult["policyKind"] {
   if (driver === "learned") return "learned";
+  if (driver === "arbiter") return "arbitrated";
   if (driver === "rule") return "demonstrator";
   if (driver === "random") return "random";
   return "manual";
@@ -467,7 +619,68 @@ function renderActionNow(action: number, reason: string, legal: boolean): void {
   $("action-label").textContent = spec ? spec.label : `动作 ${action}`;
   $("action-label").style.color = legal ? "#7dd3fc" : "#f87171";
   $("action-reason").textContent = reason;
-  $("action-timing").textContent = driver === "learned" ? "模型输出" : driver === "rule" ? "规则输出" : driver === "demo" ? "示范回放" : "手动";
+  $("action-timing").textContent =
+    driver === "learned"
+      ? "模型输出"
+      : driver === "arbiter" && lastDecision
+        ? decisionSourceLabel(lastDecision)
+        : driver === "rule"
+          ? "规则输出"
+          : driver === "demo"
+            ? "示范回放"
+            : "手动";
+}
+
+function decisionSourceLabel(decision: PolicyDecision): string {
+  if (decision.mode === "gather") return "仲裁 · 补观测";
+  if (decision.mode === "demonstrator") return "仲裁 · 转交示范";
+  return "仲裁 · 模型独立";
+}
+
+function sourceClass(decision: PolicyDecision | null | undefined): "model" | "gather" | "defer" | null {
+  if (!decision) return null;
+  if (decision.mode === "gather") return "gather";
+  if (decision.mode === "demonstrator") return "defer";
+  return "model";
+}
+
+/** Renders arbitration provenance, confidence and measured cost for the last turn. */
+function renderArbiterDecision(decision: PolicyDecision, obs: StepObservation, kind: string): void {
+  const spec = ACTIONS[decision.action];
+  $("action-label").textContent = spec ? spec.label : `动作 ${decision.action}`;
+  $("action-label").style.color = "#7dd3fc";
+  $("action-reason").textContent = decision.note ?? "";
+  $("action-timing").textContent = decisionSourceLabel(decision);
+  if (decision.mode === "demonstrator") arbiterEpisodeDefers += 1;
+  if (decision.mode === "gather") arbiterEpisodeGathers += 1;
+  arbiterEpisodeSteps += 1;
+
+  const container = $("action-probs");
+  container.innerHTML = "";
+  if (decision.probabilities) {
+    const ranked = decision.probabilities
+      .map((p, a) => ({ p, a }))
+      .filter((x) => x.p > 0.0005)
+      .sort((x, y) => y.p - x.p)
+      .slice(0, 6);
+    for (const { p, a } of ranked) {
+      const row = document.createElement("div");
+      row.className = `prob-row${a === decision.action ? " top" : ""}`;
+      row.innerHTML = `<span>${ACTIONS[a]?.label ?? a}</span><div class="prob-bar"><div class="prob-fill" style="width:${(p * 100).toFixed(1)}%"></div></div><span>${(p * 100).toFixed(0)}%</span>`;
+      container.appendChild(row);
+    }
+  }
+  const trust = document.createElement("div");
+  trust.className = "trust-bar";
+  trust.innerHTML = `<div style="width:${(decision.confidence * 100).toFixed(1)}%"></div>`;
+  container.appendChild(trust);
+  const meta = document.createElement("div");
+  meta.className = "obs-zero";
+  const cost = decision.cost;
+  meta.textContent = `置信 ${(decision.confidence * 100).toFixed(0)}% · 阈值 ${(arbiterThreshold * 100).toFixed(0)}% · 前向 ${cost?.forwardPasses ?? 0} · MAC ${cost?.multiplyAdds ?? 0}`;
+  container.appendChild(meta);
+  void obs;
+  void kind;
 }
 
 function renderActionProbabilities(logits: number[], chosen: number, obs: StepObservation): void {
@@ -589,6 +802,7 @@ function appendLog(
   conflict: boolean,
   driverKindValue: string,
   forceClass?: string,
+  decision?: PolicyDecision | null,
 ): void {
   const list = $("log");
   const li = document.createElement("li");
@@ -596,7 +810,12 @@ function appendLog(
   if (cls) li.classList.add(cls);
   if (cls === "success") li.classList.add("success");
   const label = action >= 0 ? ACTIONS[action]?.label ?? `动作 ${action}` : "系统";
-  li.innerHTML = `<span class="log-idx">${String(index).padStart(2, "0")}</span><span class="log-action">${label}</span> — ${reason}${conflict ? '<span class="log-conflict">⚠ 观测冲突</span>' : ""}`;
+  const sourceCls = sourceClass(decision);
+  const source =
+    sourceCls && decision
+      ? `<span class="log-source ${sourceCls}">${decisionSourceLabel(decision)} ${(decision.confidence * 100).toFixed(0)}%</span>`
+      : "";
+  li.innerHTML = `<span class="log-idx">${String(index).padStart(2, "0")}</span><span class="log-action">${label}</span> — ${reason}${source}${conflict ? '<span class="log-conflict">⚠ 观测冲突</span>' : ""}`;
   list.appendChild(li);
   list.scrollTop = list.scrollHeight;
 }
@@ -639,7 +858,23 @@ async function runLoop(maxSteps = Infinity): Promise<void> {
       appendLog(steps, -1, `模型不可用：${modelError}`, false, false, driver, "invalid");
       break;
     }
-    const action = chooseAction();
+    if (driver === "arbiter" && !arbiterNet) {
+      const message = arbiterError ?? "仲裁模型不可用";
+      appendLog(steps, -1, message, false, false, driver, "invalid");
+      arbiterError = message;
+      showArbiterError();
+      break;
+    }
+    let action: number;
+    try {
+      action = chooseAction();
+    } catch (err) {
+      const message = `仲裁决策异常：${(err as Error).message}`;
+      appendLog(steps, -1, message, false, false, driver, "invalid");
+      arbiterError = message;
+      showArbiterError();
+      break;
+    }
     if (action < 0) break;
     await executeAction(action);
     steps++;
@@ -658,15 +893,39 @@ function bindUi(): void {
       driver = btn.dataset.driver as DriverKind;
       for (const b of $("driver-switch").querySelectorAll("button")) b.classList.toggle("active", b === btn);
       stopRun();
-      if (runner && !runner.ended) {
-        // Restart from the current scenario so the driver owns a clean episode.
-        loadScenario(currentSeed);
-      }
+      void activateDriver();
       $("driver-note").textContent = driverNote();
       updateManualButtons();
-      if (driver === "manual") updateManualButtons();
+      renderArbiterStats();
     });
   }
+
+  $("arbiter-model").addEventListener("change", () => {
+    void selectArbiterModel($<HTMLSelectElement>("arbiter-model").value as "linear" | "mlp");
+  });
+
+  $("arbiter-mode").addEventListener("change", () => {
+    arbiterMode = $<HTMLSelectElement>("arbiter-mode").value as LowConfidenceMode;
+    if (driver === "arbiter") {
+      arbiter = buildArbiter();
+      arbiter?.reset?.(currentSeed);
+      loadScenario(currentSeed);
+    }
+    renderArbiterStats();
+  });
+
+  $("arbiter-threshold").addEventListener("change", () => {
+    const value = Number($<HTMLInputElement>("arbiter-threshold").value);
+    if (Number.isFinite(value) && value > 0 && value < 1) {
+      arbiterThreshold = value;
+      if (driver === "arbiter") {
+        arbiter = buildArbiter();
+        arbiter?.reset?.(currentSeed);
+        loadScenario(currentSeed);
+      }
+      renderArbiterStats();
+    }
+  });
 
   $("btn-play").addEventListener("click", () => {
     if (running) {
@@ -692,6 +951,13 @@ function bindUi(): void {
     }
     if (modelError && driver === "learned") {
       appendLog(-1, -1, `模型不可用：${modelError}`, false, false, driver, "invalid");
+      return;
+    }
+    if (driver === "arbiter" && !arbiterNet) {
+      const message = arbiterError ?? "仲裁模型不可用";
+      appendLog(-1, -1, message, false, false, driver, "invalid");
+      arbiterError = message;
+      showArbiterError();
       return;
     }
     const action = chooseAction();
@@ -751,9 +1017,38 @@ function bindUi(): void {
   });
 }
 
+/** Switches to the selected driver, loading whatever model that driver needs. */
+async function activateDriver(): Promise<void> {
+  if (driver === "arbiter") {
+    arbiterNet = await loadArbiterModel(arbiterModelKind);
+    arbiterMetaVersion = arbiterModelKind === "linear" ? "linear-experiment" : "mlp-experiment";
+    arbiter = buildArbiter();
+  }
+  if (driver === "rule" && !ruleKernel) ruleKernel = makeRuleDemonstrator();
+  if (runner && !runner.ended) {
+    // Restart from the current scenario so the driver owns a clean episode.
+    loadScenario(currentSeed);
+  } else if (runner && runner.ended) {
+    loadScenario(currentSeed);
+  }
+  renderArbiterStats();
+}
+
+async function selectArbiterModel(kind: "linear" | "mlp"): Promise<void> {
+  arbiterModelKind = kind;
+  if (driver === "arbiter") {
+    arbiterNet = await loadArbiterModel(kind);
+    arbiterMetaVersion = kind === "linear" ? "linear-experiment" : "mlp-experiment";
+    arbiter = buildArbiter();
+    loadScenario(currentSeed);
+  }
+  renderArbiterStats();
+}
+
 async function boot(): Promise<void> {
   bindUi();
   await Promise.all([loadModel(), loadDemos()]);
+  await loadArbiterConfig();
   void loadEvalReport();
   loadScenario(currentSeed, forcedCondition === "auto" ? undefined : forcedCondition);
   $("action-timing").textContent = "";

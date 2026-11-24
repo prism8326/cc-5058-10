@@ -324,7 +324,7 @@ body {
 
 .segmented {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
   padding: 4px;
   background: rgba(6, 10, 20, 0.7);
@@ -709,7 +709,6 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
-
 .manual-grid button {
   padding: 7px 8px;
   font-size: 11px;
@@ -740,6 +739,101 @@ body {
 .manual-grid button.refuse {
   border-color: rgba(251, 191, 36, 0.3);
   color: var(--warn);
+}
+
+.arbiter-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.arbiter-controls .field:last-child {
+  grid-column: span 2;
+}
+
+.arbiter-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.arbiter-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(6, 10, 20, 0.55);
+  min-width: 72px;
+}
+
+.arbiter-stat span {
+  font-size: 9.5px;
+  color: var(--text-faint);
+}
+
+.arbiter-stat strong {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.arbiter-stat.gather strong {
+  color: var(--accent);
+}
+.arbiter-stat.defer strong {
+  color: var(--accent-2);
+}
+.arbiter-stat.bad strong {
+  color: var(--bad);
+}
+
+.arbiter-error {
+  margin-top: 9px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.1);
+  color: #fca5a5;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.trust-bar {
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(120, 150, 210, 0.15);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.trust-bar > div {
+  height: 100%;
+  background: linear-gradient(90deg, #fbbf24, #34d399);
+  transition: width 0.2s;
+}
+
+.log li .log-source {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid currentColor;
+  opacity: 0.85;
+}
+
+.log li .log-source.gather {
+  color: var(--accent);
+}
+.log li .log-source.defer {
+  color: var(--accent-2);
+}
+.log li .log-source.model {
+  color: var(--good);
 }
 
 @media (max-width: 1100px) {
